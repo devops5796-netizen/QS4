@@ -43,6 +43,28 @@ jobs:
               "special_numbers-plate_numbers": "https://qatarsale.com/ar/products/special_numbers-plate_numbers?basic_search:StatusFilter=0",
               "bikes":                         "https://qatarsale.com/ar/products/bikes?basic_search:StatusFilter=0",
               "caravan":                       "https://qatarsale.com/ar/products/caravan?basic_search:StatusFilter=0",
+              "gift_items":                    "https://qatarsale.com/ar/products/gift_items?basic_search:StatusFilter=0",
+              "escalator":                     "https://qatarsale.com/ar/products/escalator?basic_search:StatusFilter=0",
+              "air_beds_sleeping_bags":        "https://qatarsale.com/ar/products/air_beds_sleeping_bags?basic_search:StatusFilter=0",
+              "cashier_machines":              "https://qatarsale.com/ar/products/cashier_machines?basic_search:StatusFilter=0",
+              "elevators":                     "https://qatarsale.com/ar/products/elevators?basic_search:StatusFilter=0",
+              "travel_accessories":            "https://qatarsale.com/ar/products/travel_accessories?basic_search:StatusFilter=0",
+              "generators":                    "https://qatarsale.com/ar/products/generators?basic_search:StatusFilter=0",
+              "building_materials":            "https://qatarsale.com/ar/products/building_materials?basic_search:StatusFilter=0",
+              "shaving_hair_removal_products": "https://qatarsale.com/ar/products/shaving_hair_removal_products?basic_search:StatusFilter=0",
+              "metal_detector":                "https://qatarsale.com/ar/products/metal_detector?basic_search:StatusFilter=0",
+              "aquariums":                     "https://qatarsale.com/ar/products/aquariums?basic_search:StatusFilter=0",
+              "business_industrial":           "https://qatarsale.com/ar/products/business_industrial?basic_search:StatusFilter=0",
+              "pumps":                         "https://qatarsale.com/ar/products/pumps?basic_search:StatusFilter=0",
+              "walkie_talkie":                 "https://qatarsale.com/ar/products/walkie_talkie?basic_search:StatusFilter=0",
+              "glasses":                       "https://qatarsale.com/ar/products/glasses?basic_search:StatusFilter=0",
+              "safe_boxes":                    "https://qatarsale.com/ar/products/safe_boxes?basic_search:StatusFilter=0",
+              "tracking_systems":              "https://qatarsale.com/ar/products/tracking_systems?basic_search:StatusFilter=0",
+              "pet_accessories":               "https://qatarsale.com/ar/products/pet_accessories?basic_search:StatusFilter=0",
+              "stamps":                        "https://qatarsale.com/ar/products/stamps?basic_search:StatusFilter=0",
+              "inflatable_games":              "https://qatarsale.com/ar/products/inflatable_games?basic_search:StatusFilter=0",
+              "porta_cabin":                   "https://qatarsale.com/ar/products/porta_cabin?basic_search:StatusFilter=0",
+              "fishing_equipment":             "https://qatarsale.com/ar/products/fishing_equipment?basic_search:StatusFilter=0"
           }
 
           JOBS_PER_CATEGORY = {
@@ -50,6 +72,28 @@ jobs:
               "special_numbers-plate_numbers": 5,
               "bikes":                         2,
               "caravan":                       2,
+              "gift_items":                    1,
+              "escalator":                     1,
+              "air_beds_sleeping_bags":        1,
+              "cashier_machines":              1,
+              "elevators":                     1,
+              "travel_accessories":            1,
+              "generators":                    1,
+              "building_materials":            1,
+              "shaving_hair_removal_products": 1,
+              "metal_detector":                1,
+              "aquariums":                     1,
+              "business_industrial":           1,
+              "pumps":                         1,
+              "walkie_talkie":                 1,
+              "glasses":                       1,
+              "safe_boxes":                    1,
+              "tracking_systems":              1,
+              "pet_accessories":               1,
+              "stamps":                        1,
+              "inflatable_games":              1,
+              "porta_cabin":                   1,
+              "fishing_equipment":             1
           }
 
           matrix = {"include": []}
@@ -145,7 +189,11 @@ jobs:
 
     strategy:
       matrix:
-        category: [cars_for_rent, special_numbers-plate_numbers, bikes, caravan]
+        category: [cars_for_rent, special_numbers-plate_numbers, bikes, caravan, gift_items, escalator, 
+                   air_beds_sleeping_bags, cashier_machines, elevators, travel_accessories, generators,
+                   building_materials, shaving_hair_removal_products, metal_detector, aquariums, 
+                   business_industrial, pumps, walkie_talkie, glasses, safe_boxes, tracking_systems, 
+                   pet_accessories, stamps, inflatable_games, porta_cabin, fishing_equipment]
 
     steps:
       - name: Checkout repo
