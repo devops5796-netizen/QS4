@@ -1,0 +1,252 @@
+name: QatarSale Showrooms Scraper
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  detect_showrooms:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build_matrix.outputs.matrix }}
+      total: ${{ steps.build_matrix.outputs.total }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install "scrapling[all]" pandas openpyxl
+          playwright install chromium
+          playwright install-deps chromium
+          python -m patchright install chromium
+
+      - name: Detect all showrooms and build matrix
+        id: build_matrix
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          python << 'EOF'
+          import json
+          import os
+          from showroom_links_scraper import get_showroom_links
+
+          showrooms = get_showroom_links()
+          total = len(showrooms)
+
+          matrix = {"include": []}
+          
+          if total == 0:
+              print("❌ No showrooms found, skipping")
+              matrix = {"include": [{"url": "none", "name": "none"}]}
+          else:
+              for i, url in enumerate(showrooms):
+                  name = url.split("/ar/showroom/")[-1].split("/")[0] if "/ar/showroom/" in url else f"showroom_{i}"
+                  matrix["include"].append({
+                      "index": i,
+                      "url": url,
+                      "name": name
+                  })
+
+          print(f"📊 Total jobs: {len(matrix['include'])}")
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"matrix={json.dumps(matrix)}\n")
+              f.write(f"total={total}\n")
+          EOF
+
+  scrape_showrooms:
+    runs-on: ubuntu-latest
+    needs: detect_showrooms
+    if: needs.detect_showrooms.outputs.total != '0'
+    strategy:
+      matrix: ${{ fromJson(needs.detect_showrooms.outputs.matrix) }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-showrooms-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install "scrapling[all]" openpyxl
+          playwright install chromium
+          playwright install-deps chromium
+          python -m patchright install chromium
+
+      - name: Run single showroom scraper
+        env:
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_ENDPOINT_URL: ${{ secrets.CF_R2_ENDPOINT_URL }}
+          CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
+        run: |
+          echo "🔄 Processing showroom ${{ matrix.index }}: ${{ matrix.name }}"
+          echo "URL: ${{ matrix.url }}"
+          python -u showroom_main.py "${{ matrix.url }}"
+
+      - name: Upload Excel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: showroom-${{ matrix.index }}-${{ matrix.name }}
+          path: |
+            showroom_*.xlsx
+            *_failed.txt
+          if-no-files-found: ignore
+
+  merge_all_showrooms:
+    runs-on: ubuntu-latest
+    needs: scrape_showrooms
+    if: always()
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pandas openpyxl boto3
+
+      - name: Download all showroom artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: showroom-*
+          merge-multiple: true
+          path: showroom_parts/
+
+      - name: Merge all showrooms into one Excel with sheets
+        env:
+          CF_R2_ACCESS_KEY_ID: ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+          CF_R2_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+          CF_R2_ENDPOINT_URL: ${{ secrets.CF_R2_ENDPOINT_URL }}
+          CF_R2_BUCKET_NAME: ${{ secrets.CF_R2_BUCKET_NAME }}
+        run: |
+          python << 'EOF'
+          import pandas as pd
+          import glob, os, boto3
+          from datetime import datetime
+
+          excel_files = glob.glob('showroom_parts/showroom_*.xlsx')
+          failed_files = glob.glob('showroom_parts/*_failed.txt')
+          
+          print(f"📊 Found {len(excel_files)} Excel files")
+          print(f"📊 Found {len(failed_files)} failed files")
+
+          with pd.ExcelWriter('all_showrooms.xlsx', engine='openpyxl') as writer:
+              sheets_added = 0
+              for f in excel_files:
+                  try:
+                      base_name = os.path.basename(f)
+                      sheet_name = base_name.replace('showroom_', '').replace('.xlsx', '')[:31]
+                      
+                      df = pd.read_excel(f, sheet_name=0)
+                      
+                      counter = 1
+                      original_name = sheet_name
+                      while sheet_name in writer.sheets:
+                          sheet_name = f"{original_name}_{counter}"
+                          counter += 1
+                      
+                      df.to_excel(writer, sheet_name=sheet_name, index=False)
+                      sheets_added += 1
+                      print(f"✅ Added sheet: {sheet_name} ({len(df)} rows)")
+                  except Exception as e:
+                      print(f"⚠️ Error processing {f}: {e}")
+
+          print(f"✅ Merged {sheets_added} sheets into all_showrooms.xlsx")
+
+          all_failed_urls = []
+          for f in failed_files:
+              try:
+                  with open(f, 'r', encoding='utf-8') as file:
+                      for line in file:
+                          line = line.strip()
+                          if line.startswith('http'):
+                              all_failed_urls.append(line)
+                  print(f"✅ Failed URLs from: {os.path.basename(f)}")
+              except Exception as e:
+                  print(f"⚠️ Error reading {f}: {e}")
+
+          client = boto3.client('s3',
+              endpoint_url=os.environ['CF_R2_ENDPOINT_URL'],
+              aws_access_key_id=os.environ['CF_R2_ACCESS_KEY_ID'],
+              aws_secret_access_key=os.environ['CF_R2_SECRET_ACCESS_KEY'],
+              region_name='auto'
+          )
+          bucket = os.environ['CF_R2_BUCKET_NAME']
+          dt = datetime.now()
+          base_key = f"qatarsale/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/showrooms"
+
+          client.upload_file('all_showrooms.xlsx', bucket, f"{base_key}/excel/all_showrooms.xlsx",
+              ExtraArgs={'ContentType': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
+          print(f"✅ Uploaded: {base_key}/excel/all_showrooms.xlsx")
+
+          # ========== 4. تقرير الـ summary ==========
+          summary = f"=== Showrooms Scraper Summary ===\n"
+          summary += f"Date: {dt.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+          summary += f"Total Showrooms: {len(excel_files)}\n"
+          summary += f"Total Sheets in Excel: {sheets_added}\n"
+          summary += f"Total Failed URLs: {len(all_failed_urls)}\n\n"
+
+          if all_failed_urls:
+              summary += f"=== Failed URLs ({len(all_failed_urls)}) ===\n"
+              for url in all_failed_urls[:50]:
+                  summary += f"  - {url}\n"
+              if len(all_failed_urls) > 50:
+                  summary += f"  ... and {len(all_failed_urls) - 50} more\n"
+
+          with open('summary.txt', 'w', encoding='utf-8') as f:
+              f.write(summary)
+
+          client.upload_file('summary.txt', bucket, f"{base_key}/summary/summary.txt",
+              ExtraArgs={'ContentType': 'text/plain; charset=utf-8'})
+          print(f"✅ Uploaded summary: {base_key}/summary/summary.txt")
+
+          if all_failed_urls:
+              with open('failed_urls.txt', 'w', encoding='utf-8') as f:
+                  for url in all_failed_urls:
+                      f.write(url + '\n')
+              
+              client.upload_file('failed_urls.txt', bucket, f"{base_key}/summary/failed_urls.txt",
+                  ExtraArgs={'ContentType': 'text/plain; charset=utf-8'})
+              print(f"✅ Uploaded failed URLs: {base_key}/summary/failed_urls.txt")
+
+          print("🎉 Done!")
+          EOF
+
+      - name: Upload merged file
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-showrooms-merged
+          path: all_showrooms.xlsx
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: showroom-summary
+          path: summary.txt
