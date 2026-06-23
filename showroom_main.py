@@ -13,16 +13,17 @@ load_dotenv()
 
 
 def process_showroom(url, jsonl_file):
+    slug = url.split("/ar/showroom/")[-1].split("/")[0] if "/ar/showroom/" in url else "showroom"
+
     for attempt in range(3):
         try:
             details, product_links = showroom_parser.scrape_showroom(url)
 
             if not product_links:
-                raise Exception("No products found")
+                print(f"  [EMPTY] No products in {slug}")
+                return None, "empty"
 
-            showroom_name = url.split("/ar/showroom/")[-1].split("/")[0] if "/ar/showroom/" in url else "showroom"
-            
-            tmp_csv = f"tmp_{showroom_name}.csv"
+            tmp_csv = f"tmp_{slug}.csv"
             pd.DataFrame({"product_url": product_links}).to_csv(tmp_csv, index=False)
 
             products_scraper.run(
@@ -34,41 +35,45 @@ def process_showroom(url, jsonl_file):
 
             df = flatten.run(jsonl_file)["df"]
 
-            # upload showroom image
-            if details.get("image"):
+            if details.get("cover_image"):
                 r2 = download_images(
-                    [details["image"]],
+                    [details["cover_image"]],
                     product_url=url,
                     category="showrooms_cars_for_sale"
                 )
                 details["r2_image"] = r2[0] if r2 else ""
 
-            # attach showroom metadata
             for k, v in details.items():
                 df[k] = v
 
-            return df
+            return df, "success"
 
         except Exception as e:
-            print(f"[Attempt {attempt+1}/3] failed: {e}")
+            print(f"  [Attempt {attempt+1}/3] failed: {e}")
             time.sleep(2)
 
-    print(f"SKIP corrupted showroom: {url}")
-    return None
+    print(f"  [FAILED] Skipping: {url}")
+    return None, "failed"
+
 
 
 def run_single_showroom(url):
     slug = url.split("/ar/showroom/")[-1].split("/")[0] if "/ar/showroom/" in url else "showroom"
     jsonl_file = f"products_{slug}.jsonl"
-    
-    df = process_showroom(url, jsonl_file)
-    
-    if df is not None and not df.empty:
+
+    df, status = process_showroom(url, jsonl_file)
+
+    if status == "success" and df is not None and not df.empty:
         sheets = {slug: df}
         excel_writer.write(sheets, f"showroom_{slug}.xlsx")
-        print(f"✅ Saved: showroom_{slug}.xlsx")
+        print(f"  ✓ Saved: showroom_{slug}.xlsx")
         return True
-    return False
+    elif status == "empty":
+        print(f"  ⚠ Empty showroom: {slug}")
+        return False
+    else:
+        print(f"  ✗ Failed: {slug}")
+        return False
 
 def run_pipeline():
     links = showroom_links_scraper.get_showroom_links()

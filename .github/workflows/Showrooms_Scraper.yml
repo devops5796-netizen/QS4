@@ -157,84 +157,63 @@ jobs:
           print(f"📊 Found {len(excel_files)} Excel files")
           print(f"📊 Found {len(failed_files)} failed files")
 
+          success_sheets = []
+          empty_showrooms = []
+          failed_showrooms = []
+
           with pd.ExcelWriter('all_showrooms.xlsx', engine='openpyxl') as writer:
-              sheets_added = 0
               for f in excel_files:
                   try:
                       base_name = os.path.basename(f)
                       sheet_name = base_name.replace('showroom_', '').replace('.xlsx', '')[:31]
-                      
                       df = pd.read_excel(f, sheet_name=0)
-                      
                       counter = 1
                       original_name = sheet_name
                       while sheet_name in writer.sheets:
                           sheet_name = f"{original_name}_{counter}"
                           counter += 1
-                      
                       df.to_excel(writer, sheet_name=sheet_name, index=False)
-                      sheets_added += 1
-                      print(f"✅ Added sheet: {sheet_name} ({len(df)} rows)")
+                      success_sheets.append({"name": sheet_name, "rows": len(df)})
+                      print(f"  ✓ {sheet_name}: {len(df)} rows")
                   except Exception as e:
-                      print(f"⚠️ Error processing {f}: {e}")
+                      failed_showrooms.append(os.path.basename(f))
+                      print(f"  ✗ {f}: {e}")
 
-          print(f"✅ Merged {sheets_added} sheets into all_showrooms.xlsx")
-
-          all_failed_urls = []
-          for f in failed_files:
-              try:
-                  with open(f, 'r', encoding='utf-8') as file:
-                      for line in file:
-                          line = line.strip()
-                          if line.startswith('http'):
-                              all_failed_urls.append(line)
-                  print(f"✅ Failed URLs from: {os.path.basename(f)}")
-              except Exception as e:
-                  print(f"⚠️ Error reading {f}: {e}")
-
-          client = boto3.client('s3',
-              endpoint_url=os.environ['CF_R2_ENDPOINT_URL'],
-              aws_access_key_id=os.environ['CF_R2_ACCESS_KEY_ID'],
-              aws_secret_access_key=os.environ['CF_R2_SECRET_ACCESS_KEY'],
-              region_name='auto'
-          )
-          bucket = os.environ['CF_R2_BUCKET_NAME']
+          # Summary
           dt = datetime.now()
-          base_key = f"qatarsale/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/showrooms"
+          summary_file = "scrape_summary.txt"
+          with open(summary_file, 'w', encoding='utf-8') as f:
+              f.write(f"=== showrooms_cars_for_sale ===\n")
+              f.write(f"Run Date: {dt.strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
+              f.write(f"Status: DONE\n\n")
+              f.write(f"Total Showrooms Scraped: {len(success_sheets)}\n")
+              f.write(f"Total Failed: {len(failed_showrooms)}\n")
+              f.write(f"Total Failed URLs: {len(all_failed_urls)}\n\n")
+              f.write("--- Showrooms ---\n")
+              for s in success_sheets:
+                  f.write(f"{s['name']}: {s['rows']} products\n")
+              if failed_showrooms:
+                  f.write("\n--- Failed Showrooms ---\n")
+                  for s in failed_showrooms:
+                      f.write(f"{s}\n")
 
-          client.upload_file('all_showrooms.xlsx', bucket, f"{base_key}/excel/all_showrooms.xlsx",
+          base_key = f"qatarsale/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/showrooms_cars_for_sale"
+
+          client.upload_file('all_showrooms.xlsx', bucket,
+              f"{base_key}/excel/all_showrooms.xlsx",
               ExtraArgs={'ContentType': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
-          print(f"✅ Uploaded: {base_key}/excel/all_showrooms.xlsx")
 
-          # ========== 4. تقرير الـ summary ==========
-          summary = f"=== Showrooms Scraper Summary ===\n"
-          summary += f"Date: {dt.strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
-          summary += f"Total Showrooms: {len(excel_files)}\n"
-          summary += f"Total Sheets in Excel: {sheets_added}\n"
-          summary += f"Total Failed URLs: {len(all_failed_urls)}\n\n"
-
-          if all_failed_urls:
-              summary += f"=== Failed URLs ({len(all_failed_urls)}) ===\n"
-              for url in all_failed_urls[:50]:
-                  summary += f"  - {url}\n"
-              if len(all_failed_urls) > 50:
-                  summary += f"  ... and {len(all_failed_urls) - 50} more\n"
-
-          with open('summary.txt', 'w', encoding='utf-8') as f:
-              f.write(summary)
-
-          client.upload_file('summary.txt', bucket, f"{base_key}/summary/summary.txt",
+          client.upload_file(summary_file, bucket,
+              f"{base_key}/summary/scrape_summary.txt",
               ExtraArgs={'ContentType': 'text/plain; charset=utf-8'})
-          print(f"✅ Uploaded summary: {base_key}/summary/summary.txt")
 
           if all_failed_urls:
               with open('failed_urls.txt', 'w', encoding='utf-8') as f:
                   for url in all_failed_urls:
                       f.write(url + '\n')
-              
-              client.upload_file('failed_urls.txt', bucket, f"{base_key}/summary/failed_urls.txt",
+              client.upload_file('failed_urls.txt', bucket,
+                  f"{base_key}/summary/failed_urls.txt",
                   ExtraArgs={'ContentType': 'text/plain; charset=utf-8'})
-              print(f"✅ Uploaded failed URLs: {base_key}/summary/failed_urls.txt")
 
           print("🎉 Done!")
           EOF

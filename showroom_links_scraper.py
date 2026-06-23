@@ -15,16 +15,19 @@ def get_showroom_links():
         timeout=60000,
         wait_for_idle_network_timeout=10000
     )
+    
+    all_links = []
 
-    items = page.css("[data-testid='at-showroom-item-link-title'] a")
+    def extract_links(page):
+        links = []
+        for i in page.css("[data-testid='at-showroom-item-link-title'] a"):
+            href = i.attrib.get("href", "")
+            if href:
+                links.append(urljoin(BASE_URL, href))
+        return links
+    
+    all_links.extend(extract_links(page))
 
-    links = []
-    for i in items:
-        href = i.attrib.get("href", "")
-        if href:
-            links.append(urljoin(BASE_URL, href))
-            
-    links = list(dict.fromkeys(links))
-    print(f"Found {len(links)} of showroom")
-
-    return links
+    all_links = list(dict.fromkeys(all_links))
+    print(f"Found {len(all_links)} showrooms")
+    return all_links

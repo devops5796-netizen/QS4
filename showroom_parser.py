@@ -99,32 +99,45 @@ def extract_product_links(page):
 def scrape_showroom(showroom_url):
     print(f"\nScraping: {showroom_url}")
 
-    page = StealthyFetcher.fetch(
-        showroom_url,
-        headless=True,
-        network_idle=True,
-        timeout=60000,
-        wait_for_idle_network_timeout=10000)
-
-    details = parse_showroom_details(page, showroom_url)
-    max_pages = get_max_pages(page)
-
-    print(f"Pages: {max_pages}")
-
-    all_products = set()
-
-    for p in range(1, max_pages + 1):
-        url = showroom_url if p == 1 else f"{showroom_url}?page={p}"
-
-        pg = StealthyFetcher.fetch(
-            url, 
+    try:
+        page = StealthyFetcher.fetch(
+            showroom_url,
             headless=True,
             network_idle=True,
             timeout=60000,
-            wait_for_idle_network_timeout=10000)
-        links = extract_product_links(pg)
+            wait_for_idle_network_timeout=10000
+        )
+    except Exception as e:
+        print(f"  [ERROR] Failed to fetch showroom page: {e}")
+        return {}, []
+    
+    details = parse_showroom_details(page, showroom_url)
+    max_pages = get_max_pages(page)
+    print(f"Pages: {max_pages}")
 
-        print(f"Page {p}: {len(links)} products")
-        all_products.update(links)
+    all_products = set(extract_product_links(page))
+    print(f"  Page 1: {len(all_products)} products")
 
-    return details, list(all_products)
+    for p in range(2, max_pages + 1):
+        url = f"{showroom_url}?page={p}"
+        try:
+            pg = StealthyFetcher.fetch(
+                url,
+                headless=True,
+                network_idle=True,
+                timeout=60000,
+                wait_for_idle_network_timeout=10000
+            )
+            links = extract_product_links(pg)
+            print(f"  Page {p}: {len(links)} products")
+            all_products.update(links)
+        except Exception as e:
+            print(f"  [ERROR] Page {p}: {e}")
+            continue
+
+    product_list = list(all_products)
+
+    if not product_list:
+        print(f"  [INFO] No products found in {showroom_url}")
+
+    return details, product_list
