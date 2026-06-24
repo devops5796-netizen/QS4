@@ -221,7 +221,7 @@ jobs:
         run: |
           python << 'EOF'
           import pandas as pd
-          import glob, os, boto3
+          import glob, os, boto3, subprocess
           from datetime import datetime
           from r2_uploader import upload_final_batch_assets
 
@@ -235,12 +235,12 @@ jobs:
           dfs = [pd.read_excel(f) for f in files]
           merged = pd.concat(dfs, ignore_index=True)
           merged = merged.drop_duplicates(subset=['product_url'], keep='first')
+          total = len(merged)
 
           output_file = f"{category}.xlsx"
           with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
               merged.to_excel(writer, sheet_name=category[:31], index=False)
 
-          total = len(merged)
           print(f"Category: {category} | Rows: {total} | Files merged: {len(files)}")
 
           result = upload_final_batch_assets(
@@ -261,6 +261,18 @@ jobs:
           bucket = os.environ['CF_R2_BUCKET_NAME']
           base_key = f"qatarsale/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/{category}/summary"
 
+          # ✅ لو cars_for_rent — split by manufacturer
+          if category == "cars_for_rent":
+              subprocess.run(["pip", "install", "openpyxl"], check=True)
+              subprocess.run(["python", "split_by_manufacturer.py", output_file, f"excel_by_manufacturer_{category}"], check=True)
+
+              prefix = f"qatarsale/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/{category}/excel/by_manufacturer"
+              for f in glob.glob(f"excel_by_manufacturer_{category}/*.xlsx"):
+                  key = f"{prefix}/{os.path.basename(f)}"
+                  client.upload_file(f, bucket, key,
+                      ExtraArgs={'ContentType': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
+                  print(f"Uploaded: {key}")
+
           # Summary
           summary_file = f"scrape_summary_{category}.txt"
           with open(summary_file, 'w', encoding='utf-8') as f:
@@ -269,10 +281,22 @@ jobs:
               f.write(f"Status: DONE\n")
               f.write(f"Total Rows: {total}\n")
               f.write(f"Files Merged: {len(files)}\n\n")
+              f.write("--- Column Analysis ---\n")
               for col in merged.columns:
                   missing = merged[col].isna().sum() + (merged[col] == '').sum()
                   pct = (missing / total) * 100 if total > 0 else 0
                   f.write(f"{col}: {missing} empty ({pct:.2f}%)\n")
+
+              # ✅ لو cars_for_rent — breakdown بالمصنع
+              if category == "cars_for_rent":
+                  if 'المصنع' in merged.columns:
+                      f.write("\n--- By Manufacturer ---\n")
+                      for mfr, count in merged['المصنع'].value_counts().items():
+                          f.write(f"{mfr}: {count} products\n")
+                  if 'الصنف' in merged.columns:
+                      f.write("\n--- By Model ---\n")
+                      for model, count in merged['الصنف'].value_counts().items():
+                          f.write(f"{model}: {count} products\n")
 
           client.upload_file(summary_file, bucket, f"{base_key}/scrape_summary.txt",
               ExtraArgs={'ContentType': 'text/plain; charset=utf-8'})
