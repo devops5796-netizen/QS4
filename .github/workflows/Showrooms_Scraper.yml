@@ -151,20 +151,43 @@ jobs:
           import glob, os, boto3
           from datetime import datetime
 
-          excel_files = glob.glob('showroom_parts/showroom_*.xlsx')
+          excel_files  = glob.glob('showroom_parts/showroom_*.xlsx')
           failed_files = glob.glob('showroom_parts/*_failed.txt')
-          
-          print(f"📊 Found {len(excel_files)} Excel files")
-          print(f"📊 Found {len(failed_files)} failed files")
 
-          success_sheets = []
-          empty_showrooms = []
+          print(f"Found {len(excel_files)} Excel files")
+          print(f"Found {len(failed_files)} failed files")
+
+          # ✅ boto3 client أول حاجة
+          dt     = datetime.now()
+          bucket = os.environ['CF_R2_BUCKET_NAME']
+          client = boto3.client('s3',
+              endpoint_url=os.environ['CF_R2_ENDPOINT_URL'],
+              aws_access_key_id=os.environ['CF_R2_ACCESS_KEY_ID'],
+              aws_secret_access_key=os.environ['CF_R2_SECRET_ACCESS_KEY'],
+              region_name='auto'
+          )
+          base_key = f"qatarsale/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/showrooms_cars_for_sale"
+
+          # ✅ collect failed URLs أول
+          all_failed_urls = []
+          for f in failed_files:
+              try:
+                  with open(f, 'r', encoding='utf-8') as file:
+                      for line in file:
+                          line = line.strip()
+                          if line.startswith('http'):
+                              all_failed_urls.append(line)
+              except Exception as e:
+                  print(f"Error reading {f}: {e}")
+
+          # Merge Excel
+          success_sheets  = []
           failed_showrooms = []
 
           with pd.ExcelWriter('all_showrooms.xlsx', engine='openpyxl') as writer:
               for f in excel_files:
                   try:
-                      base_name = os.path.basename(f)
+                      base_name  = os.path.basename(f)
                       sheet_name = base_name.replace('showroom_', '').replace('.xlsx', '')[:31]
                       df = pd.read_excel(f, sheet_name=0)
                       counter = 1
@@ -179,15 +202,20 @@ jobs:
                       failed_showrooms.append(os.path.basename(f))
                       print(f"  ✗ {f}: {e}")
 
+          # Upload Excel
+          client.upload_file('all_showrooms.xlsx', bucket,
+              f"{base_key}/excel/all_showrooms.xlsx",
+              ExtraArgs={'ContentType': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
+          print(f"Uploaded: {base_key}/excel/all_showrooms.xlsx")
+
           # Summary
-          dt = datetime.now()
           summary_file = "scrape_summary.txt"
           with open(summary_file, 'w', encoding='utf-8') as f:
               f.write(f"=== showrooms_cars_for_sale ===\n")
               f.write(f"Run Date: {dt.strftime('%Y-%m-%d %H:%M:%S')} UTC\n")
               f.write(f"Status: DONE\n\n")
               f.write(f"Total Showrooms Scraped: {len(success_sheets)}\n")
-              f.write(f"Total Failed: {len(failed_showrooms)}\n")
+              f.write(f"Total Failed Showrooms: {len(failed_showrooms)}\n")
               f.write(f"Total Failed URLs: {len(all_failed_urls)}\n\n")
               f.write("--- Showrooms ---\n")
               for s in success_sheets:
@@ -197,35 +225,22 @@ jobs:
                   for s in failed_showrooms:
                       f.write(f"{s}\n")
 
-          base_key = f"qatarsale/year={dt.year}/month={dt.strftime('%m')}/day={dt.strftime('%d')}/showrooms_cars_for_sale"
-
-          client.upload_file('all_showrooms.xlsx', bucket,
-              f"{base_key}/excel/all_showrooms.xlsx",
-              ExtraArgs={'ContentType': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})
-
           client.upload_file(summary_file, bucket,
               f"{base_key}/summary/scrape_summary.txt",
               ExtraArgs={'ContentType': 'text/plain; charset=utf-8'})
+          print(f"Uploaded: {base_key}/summary/scrape_summary.txt")
 
-          if all_failed_urls:
-              with open('failed_urls.txt', 'w', encoding='utf-8') as f:
-                  for url in all_failed_urls:
-                      f.write(url + '\n')
-              client.upload_file('failed_urls.txt', bucket,
-                  f"{base_key}/summary/failed_urls.txt",
-                  ExtraArgs={'ContentType': 'text/plain; charset=utf-8'})
+          # Failed URLs
+          failed_file = "failed_urls.txt"
+          with open(failed_file, 'w', encoding='utf-8') as f:
+              f.write(f"Total Failed URLs: {len(all_failed_urls)}\n\n")
+              for u in all_failed_urls:
+                  f.write(u + '\n')
 
-          print("🎉 Done!")
+          client.upload_file(failed_file, bucket,
+              f"{base_key}/summary/failed_urls.txt",
+              ExtraArgs={'ContentType': 'text/plain; charset=utf-8'})
+          print(f"Uploaded: {base_key}/summary/failed_urls.txt")
+
+          print("Done!")
           EOF
-
-      - name: Upload merged file
-        uses: actions/upload-artifact@v4
-        with:
-          name: all-showrooms-merged
-          path: all_showrooms.xlsx
-
-      - name: Upload summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: showroom-summary
-          path: summary.txt
